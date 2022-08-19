@@ -1,92 +1,54 @@
-import argparse
-import numpy as np
-from CPU import *
-from GPUkernals import *
 from numba import cuda
 
-def main():
+
+def gpu_parameter_loading_from_cpu(**kwargs):
+    """if parameter exist on CPU then copy to GPU"""
+    for key in kwargs:
+        try:
+            """create a new parameter name with _global and assign the cpu """
+            locals()[str(key) + '_global'] = cuda.to_device(key)
+        except:
+            print('%s has not been initialize in CPU' % key)
+            return 0
+        else:
+            return 1
 
 
-    t0 = time.time()
-    n = 100
-    m = 100
-
-    rhoo = 6.00
-
-    feq = np.full((9, n + 1, m + 1), 0, float)
-    f = np.full((9, n + 1, m + 1), 0, float)
-    rho = np.full((n + 1, m + 1), rhoo, float)
-    w = (4. / 9, 1. / 9, 1. / 9, 1. / 9, 1. / 9, 1. / 36, 1. / 36, 1. / 36, 1. / 36)
-    cx = (0.0, 1.0, 0.0, -1.0, 0.0, 1.0, -1.0, -1.0, 1.0)
-    cy = (0.0, 0.0, 1.0, 0.0, -1.0, 1.0, 1.0, -1.0, -1.0)
-    u = np.full((n + 1, m + 1), 0, float)
-    v = np.full((n + 1, m + 1), 0, float)
-    g = np.full((9, n + 1, m + 1), 0, float)
-    geq = np.full((9, n + 1, m + 1), 0, float)
-    th = np.full((n + 1, m + 1), 0, float)
-    uo = 0.0
-    sumvelo = 0.0
-
-    dx = 1.0
-    dy = dx
-    dt = 1.0
-    tw = 1.0
-    th = np.full((n + 1, m + 1), 0, float)
-    ra = 1.0e5
-    pr = 0.71
-    visco = 0.02
-    alpha = visco / pr
-    pr = visco / alpha
-    gbeta = ra * visco * alpha / (float(m * m * m))
-    Re = uo * m / alpha
-    omega = 1.0 / (3. * visco + 0.5)
-    parameters = [omega, gbeta]
-
-    omegat = 1.0 / (3. * alpha + 0.5)
-    timestep = 15000
-    t01 = time.time()
-
-    def run_on_cpu(target_function):
-        def wrapper (*args, **kwargs):
-            startTime = time.time()
-            target_function(*args, **kwargs)
-            endTime = time.time()
-            msecs = (endTime - startTime)*1000
-            print("this step used %d ms" % msecs)
-
-        return wrapper
+def cpu_parameter_loading_from_gpu(**kwargs):
+    """if parameter exist on GPU then retrieve"""
+    for key in kwargs:
+        func_name_on_gpu = str(key) + '_global'
+        """tell if exist on GPU"""
+        parameter_type = type(func_name_on_gpu)
+        """if on GPU"""
+        if 'cuda' in str(parameter_type):
+            kwargs[key] = func_name_on_gpu.copy_to_host
+        """if not on GPU"""
+    else:
+        print('%s is not on GPU, the original cpu version of %s is used' % (key, key))
+        return 0
+    return 1
 
 
-    def run_on_gpu(target_function):
-        """compute the appropriate Thread allocation method for target gpu"""
-        def dispatch(m,n):
-            threadsperblock = (16, 16)
-            blockspergrid_x = np.math.ceil(m / threadsperblock[0])
-            blockspergrid_y = np.math.ceil(n / threadsperblock[1])
-            blockspergrid = (blockspergrid_x, blockspergrid_y)
-            return threadsperblock, blockspergrid
-        TPB,BPG=dispatch(m,n)
-
-        """load the parameters to gpu global memory"""
-        """1.Figure out where are the parameters stored"""
-        """2.If stored on cpu then copy to gpu with a new name(+'_global')"""
-
-        def parameter_loading(*args,**kwargs):
-            for key in args:
-                """How to judge if the parameters is existing on GPU or not"""
-                locals()[str(key)+'_global']=cuda.to_device(key)
-
-
-        def wrapper(*args, **kwargs):
-            startTime = time.time()
-            parameter_loading(*args, **kwargs)
-            target_function[TPB,BPG](*args, **kwargs)
-            endTime = time.time()
-            msecs = (endTime - startTime) * 1000
-            print("this step used %d ms" % msecs)
-
-        return wrapper
-
-
-
+def run(target_function, target_device, TPB=1, BPG=1, **kwargs):
+    new_func_name = target_function.__name__ + '_' + target_device
+    if target_device == 'cpu':
+        try:
+            new_func_name(**kwargs)
+        except:
+            print('failed to run %s on %s' % (str(target_function), str(target_device)))
+            return 0
+        else:
+            return 1
+    elif target_device == 'gpu':
+        try:
+            new_func_name[TPB, BPG](**kwargs)
+        except:
+            print('failed to run %s on %s' % (str(target_function), str(target_device)))
+            return 0
+        else:
+            return 1
+    else:
+        print('please input correct target device type (cpu / gpu)')
+        return 0
 
