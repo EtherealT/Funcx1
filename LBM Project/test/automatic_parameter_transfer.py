@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from numba import cuda
+from numba import njit
 
 t0 = time.time()
 n = 100
@@ -58,8 +59,9 @@ def collision_gpu(u, v, f, feq, rho, omega, w, cx, cy, n, m, th,gbeta):
             feq[k, row, col] = rho[row, col] * w[k] * (1.0 + 3.0 * t2 + 4.50 * t2 * t2 - 1.50 * t1)
             f[k, row, col] = omega * feq[k, row, col] + (1. - omega) * f[k, row, col] + force
 
-
+@njit
 def collision_cpu(u=0, v=0, f=0, feq=0, rho=0, omega=0, w=0, cx=0, cy=0, n=0, m=0, th=0, gbeta=0):
+    print('collision_cpu start')
     tref = 0.5
     for i in range(0, n + 1):
         for j in range(0, m + 1):
@@ -82,9 +84,9 @@ def gpu_parameter_loading_from_cpu(**kwargs):
     """if parameter exist on CPU then copy to GPU"""
     for key in kwargs:
         try:
-
             """create a new parameter name with _global=  _global and assign the cpu """
-            globals()[key + '_global'] = kwargs[key]
+            globals()[str(key) + '_global'] = cuda.to_device(kwargs[key])
+            print(eval('type('+str(key)+'_global'+')'))
             print('%s_global created'%key)
 
         except:
@@ -97,22 +99,14 @@ def gpu_parameter_loading_from_cpu(**kwargs):
         return
 
 
-def cpu_parameter_loading_from_gpu(**kwargs):
+def cpu_parameter_loading_from_gpu(*args):
     """if parameter exist on GPU then retrieve"""
-    for key in kwargs:
-        func_name_on_gpu = eval(str(key) + '_global=  _global')
-        """tell if exist on GPU"""
+    for arg in args:
         try:
-            parameter_type = type(func_name_on_gpu)
-            """if on GPU"""
-            if 'cuda' in str(parameter_type):
-                kwargs[key] = func_name_on_gpu.copy_to_host
-                """if not on GPU"""
-                # print('%s load to cpu successfully' % key)
-            else:
-                print('%s is not on GPU, the original cpu version of %s is used' % (key, key))
+            print(arg)
+            globals()[str(arg)]=eval(str(arg) + '_global'+'.copy_to_host')
         except:
-            print('the parameter %s is not exist on both CPU and GPU' % key)
+            print('the parameter %s is not exist on GPU' % arg)
             return 0
     return 1
 
@@ -153,7 +147,7 @@ gpu_parameter_version_dict = parameters_version_dict()
 
 def parameter_version_maintain(location, *args, **kwargs):
     def gpu_parameter_version_compare_to_cpu(gpu_parameter_name):
-        cpu_parameter_name = str(gpu_parameter_name).replace('_global=  _global', '')
+        cpu_parameter_name = str(gpu_parameter_name).replace('_global', '')
         parameter_version_on_cpu = cpu_parameter_version_dict.get_parameter_version(cpu_parameter_name)
         print('cpu_parameter_name', cpu_parameter_name)
         """if parameter not exist in cpu dict"""
@@ -206,7 +200,7 @@ def parameter_version_maintain(location, *args, **kwargs):
                 parameter_version_on_gpu = gpu_parameter_version_dict.get_parameter_version(gpu_parameter_name)
                 print(cpu_parameter_name, current_parameter_version, parameter_version_on_gpu)
                 if parameter_version_on_gpu > current_parameter_version:
-                    cpu_parameter_loading_from_gpu(cpu_parameter_name=cpu_parameter_name)
+                    cpu_parameter_loading_from_gpu(cpu_parameter_name)
                     cpu_parameter_version_dict.parameter_version_synchronize(cpu_parameter_name,
                                                                              parameter_version_on_gpu+1)
 
@@ -251,7 +245,7 @@ def run(target_function, target_device, *args, **kwargs):
         parameter_version_maintain('gpu', **kwargs)
         TPB, BPG = args
         kwarg_value = kwargs.values()
-        eval(new_func_name)[BPG, TPB](*kwarg_value)
+
         try:
             eval(new_func_name)[BPG,TPB](*kwarg_value)
         except:
@@ -340,10 +334,10 @@ def main():
         feq=feq_global, rho=rho_global, omega=omega_global, w=w_global, cx=cx_global,
         cy=cy_global,
         n=n_global, m=m_global, th=th_global, gbeta=gbeta_global)
-    print('cpu_parameter_version_dict',cpu_parameter_version_dict.parameter_version)
-    print('gpu_parameter_version_dict:',gpu_parameter_version_dict.parameter_version)
+
     run('collision', 'cpu', u=u, v=v, f=f, feq=feq, rho=rho, omega=omega, w=w, cx=cx, cy=cy, n=n, m=m, th=th,
         gbeta=gbeta)
-
+    print('cpu_parameter_version_dict',cpu_parameter_version_dict.parameter_version)
+    print('gpu_parameter_version_dict:',gpu_parameter_version_dict.parameter_version)
 if __name__ == '__main__':
     main()
