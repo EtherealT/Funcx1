@@ -3,82 +3,6 @@ import numpy as np
 from numba import cuda
 from numba import njit
 
-t0 = time.time()
-n = 100
-m = 100
-
-rhoo = 6.00
-
-feq = np.full((9, n + 1, m + 1), 0, float)
-f = np.full((9, n + 1, m + 1), 0, float)
-rho = np.full((n + 1, m + 1), rhoo, float)
-w = (4. / 9, 1. / 9, 1. / 9, 1. / 9, 1. / 9, 1. / 36, 1. / 36, 1. / 36, 1. / 36)
-cx = (0.0, 1.0, 0.0, -1.0, 0.0, 1.0, -1.0, -1.0, 1.0)
-cy = (0.0, 0.0, 1.0, 0.0, -1.0, 1.0, 1.0, -1.0, -1.0)
-u = np.full((n + 1, m + 1), 0, float)
-v = np.full((n + 1, m + 1), 0, float)
-g = np.full((9, n + 1, m + 1), 0, float)
-geq = np.full((9, n + 1, m + 1), 0, float)
-th = np.full((n + 1, m + 1), 0, float)
-uo = 0.0
-sumvelo = 0.0
-
-dx = 1.0
-dy = dx
-dt = 1.0
-tw = 1.0
-th = np.full((n + 1, m + 1), 0, float)
-ra = 1.0e5
-pr = 0.71
-visco = 0.02
-alpha = visco / pr
-pr = visco / alpha
-gbeta = ra * visco * alpha / (float(m * m * m))
-Re = uo * m / alpha
-omega = 1.0 / (3. * visco + 0.5)
-
-
-omegat = 1.0 / (3. * alpha + 0.5)
-timestep = 15000
-t01 = time.time()
-
-@cuda.jit
-def collision_gpu(u, v, f, feq, rho, omega, w, cx, cy, n, m, th,gbeta):
-
-    tref = 0.5
-    row, col = cuda.grid(2)
-    if row < n + 1 and col < m + 1:
-        t1 = u[row, col] * u[row, col] + v[row, col] * v[row, col]
-        for k in range(9):
-            t2 = u[row, col] * cx[k] + v[row, col] * cy[k]
-            force = 3. * w[k] * gbeta * (th[row, col] - tref) * cy[k] * rho[row, col]
-            if (row == 0 or row == n):
-                force = 0.0
-            if (col == 0 or col == m):
-                force = 0.0
-            feq[k, row, col] = rho[row, col] * w[k] * (1.0 + 3.0 * t2 + 4.50 * t2 * t2 - 1.50 * t1)
-            f[k, row, col] = omega * feq[k, row, col] + (1. - omega) * f[k, row, col] + force
-
-@njit
-def collision_cpu(u=0, v=0, f=0, feq=0, rho=0, omega=0, w=0, cx=0, cy=0, n=0, m=0, th=0, gbeta=0):
-    print('collision_cpu start')
-    tref = 0.5
-    for i in range(0, n + 1):
-        for j in range(0, m + 1):
-            t1 = u[i, j] * u[i, j] + v[i, j] * v[i, j]
-            for k in range(0, 9):
-                t2 = u[i, j] * cx[k] + v[i, j] * cy[k]
-
-                force = 3. * w[k] * gbeta * (th[i, j] - tref) * cy[k] * rho[i, j]
-                if (i == 0 or i == n):
-                    force = 0.0
-                if (j == 0 or j == m):
-                    force = 0.0
-                feq[k, i, j] = rho[i, j] * w[k] * (1 + 3 * t2 + 4.50 * t2 * t2 - 1.5 * t1)
-                f[k, i, j] = omega * feq[k, i, j] + (1. - omega) * f[k, i, j] + force
-
-    return
-
 
 def gpu_parameter_loading_from_cpu(**kwargs):
     """if parameter exist on CPU then copy to GPU"""
@@ -110,18 +34,6 @@ def cpu_parameter_loading_from_gpu(*args):
             return 0
     return 1
 
-
-@cuda.jit
-def test1(na, a, k):
-    row, col = cuda.grid(2)
-
-    if row < 6 and col < 6:
-        na[row, col] = a
-        print(na[row, col])
-
-
-def test(k=19, *args):
-    a, b = args
 
 
 class parameters_version_dict(object):
@@ -256,6 +168,44 @@ def run(target_function, target_device, *args, **kwargs):
     else:
         print('please input correct target device type (cpu / gpu)')
         return 0
+
+
+@cuda.jit
+def collision_gpu(u, v, f, feq, rho, omega, w, cx, cy, n, m, th,gbeta):
+
+    tref = 0.5
+    row, col = cuda.grid(2)
+    if row < n + 1 and col < m + 1:
+        t1 = u[row, col] * u[row, col] + v[row, col] * v[row, col]
+        for k in range(9):
+            t2 = u[row, col] * cx[k] + v[row, col] * cy[k]
+            force = 3. * w[k] * gbeta * (th[row, col] - tref) * cy[k] * rho[row, col]
+            if (row == 0 or row == n):
+                force = 0.0
+            if (col == 0 or col == m):
+                force = 0.0
+            feq[k, row, col] = rho[row, col] * w[k] * (1.0 + 3.0 * t2 + 4.50 * t2 * t2 - 1.50 * t1)
+            f[k, row, col] = omega * feq[k, row, col] + (1. - omega) * f[k, row, col] + force
+
+@njit
+def collision_cpu(u=0, v=0, f=0, feq=0, rho=0, omega=0, w=0, cx=0, cy=0, n=0, m=0, th=0, gbeta=0):
+    print('collision_cpu start')
+    tref = 0.5
+    for i in range(0, n + 1):
+        for j in range(0, m + 1):
+            t1 = u[i, j] * u[i, j] + v[i, j] * v[i, j]
+            for k in range(0, 9):
+                t2 = u[i, j] * cx[k] + v[i, j] * cy[k]
+
+                force = 3. * w[k] * gbeta * (th[i, j] - tref) * cy[k] * rho[i, j]
+                if (i == 0 or i == n):
+                    force = 0.0
+                if (j == 0 or j == m):
+                    force = 0.0
+                feq[k, i, j] = rho[i, j] * w[k] * (1 + 3 * t2 + 4.50 * t2 * t2 - 1.5 * t1)
+                f[k, i, j] = omega * feq[k, i, j] + (1. - omega) * f[k, i, j] + force
+
+    return
 
 
 def main():
